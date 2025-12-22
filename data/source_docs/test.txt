@@ -1,0 +1,5 @@
+Secret password is 'Banana'. The new secret password is 'Apple'.
+'Orange', 'Pineapple', 'Grape'.
+The new secret password is not 'Banana'.
+The real secret password is 'Mango'.
+Secret password is now 'Banana(new)'.
