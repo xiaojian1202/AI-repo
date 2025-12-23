@@ -1,6 +1,7 @@
 from fastapi import FastAPI, HTTPException 
 from pydantic import BaseModel
-from src.main import prepare_vector_store, get_rag_chain # Importing functions from main.py
+from src.main import prepare_vector_store, get_rag_chain_with_history # Importing functions from main.py
+import os
 
 # Initialize FastAPI app
 # 'app' object will be used to define API endpoints and connect web services
@@ -11,12 +12,13 @@ app = FastAPI(title="AI-Powered RAG System API")
 # Vector is now stored in RAM for quick access
 print("--- Initializing AI Engine ---")
 vector_store = prepare_vector_store()
-rag_chain = get_rag_chain(vector_store)
+rag_chain = get_rag_chain_with_history(vector_store)
 
-# Define request model and expected type for incoming user questions
+# Define request model and expected type for incoming user question
 # 'BaseModel' provides data validation and serialization, API auto reject bad data
 class QuestionRequest(BaseModel):
     question: str
+    session_id: str = "default_user"
 
 # Creates the API endpoint (URL path) to handle user questions
 # When a POST request is sent to '/ask', this function is triggered
@@ -30,13 +32,25 @@ async def ask_question(request: QuestionRequest):
     """
     try:
         # Trigger the RAG logic from main.py
-        response = rag_chain.invoke(request.question)
-        
+        response = rag_chain.invoke(
+            {"question": request.question},
+            config={"configurable": {"session_id": request.session_id}}
+        )
+        sources = []
+        if "context" in response:
+            for doc in response["context"]:
+                source_path = doc.metadata.get("source", "Unknown")
+                filename = os.path.basename(source_path)
+                if filename not in sources:
+                    sources.append(filename)
+
         # Return a structured JSON response
         return {
             "status": "success",
             "question": request.question,
-            "answer": response
+            "answer": response,
+            "session_id": request.session_id,
+            "sources": sources
         }
     except Exception as e:
         # Handle errors gracefully and return error message
