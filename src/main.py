@@ -86,7 +86,7 @@ def get_rag_chain(vectorstore):
     """
     
     # Initialize LLM with Temperature 0 for deterministic, logical reasoning
-    llm = ChatGoogleGenerativeAI(model="gemini-2.0-flash", temperature=0)
+    llm = ChatGoogleGenerativeAI(model="gemini-3-flash-preview", temperature=0)
     
     # Configure retriever to fetch 'k' most relevant chunks for comprehensive context
     retriever = vectorstore.as_retriever(search_kwargs={"k": 5})
@@ -110,11 +110,22 @@ def get_rag_chain(vectorstore):
     prompt = ChatPromptTemplate.from_template(template)
 
     # LCEL 'Pipe' structure: Input -> Context Retrieval -> Prompt -> LLM -> Output
+    # Passes retrieved docs into context directly, the chain contains a key 'context' (list of docs)
+    # In RunnablePassthrough.assign, call format_docs to send formatted text to the prompt, but keep original docs in 'context'
+    # Keeping original docs let API return source info later if needed
     chain = (
-        {"context": retriever | format_docs, "question": RunnablePassthrough()}
-        | prompt
-        | llm
-        | StrOutputParser()
+        {"context": retriever, "question": RunnablePassthrough()}
+        | RunnablePassthrough.assign(
+            answer=(
+                (lambda x: {
+                    "context": format_docs(x["context"]),
+                    "question": x["question"]
+                })
+                | prompt
+                | llm
+                | StrOutputParser()
+            )
+        )
     )
     return chain
 
@@ -135,3 +146,12 @@ if __name__ == "__main__":
     print("\nAI Engine Ready. Ask a question about your documents:")
     user_query = input("> ")
     print("\nAI Response:", rag_chain.invoke(user_query))
+
+    # Old chain
+
+    '''
+        {"context": retriever | format_docs, "question": RunnablePassthrough()}
+        | prompt
+        | llm
+        | StrOutputParser()
+    '''
