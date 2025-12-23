@@ -190,24 +190,6 @@ def get_rag_chain_with_history(vectorstore):
     }
 
     gen_chain = context_step | prompt | llm | StrOutputParser()
-
-    '''
-    base_chain = (
-        {"context": retriever, "question": RunnablePassthrough()}
-        | RunnablePassthrough.assign(
-            answer=(
-                (lambda x: {
-                    "context": format_docs(x["context"]),
-                    "question": x["question"],
-                    "chat_history": x.get("chat_history", [])
-                })
-                | prompt
-                | llm
-                | StrOutputParser()
-            )
-        )
-    )
-    '''
     return RunnableWithMessageHistory(
         gen_chain,
         get_session_history,
