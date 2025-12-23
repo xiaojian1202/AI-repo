@@ -10,6 +10,8 @@ from langchain_core.runnables import RunnablePassthrough
 from langchain_core.output_parsers import StrOutputParser
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_huggingface import HuggingFaceEmbeddings
+from langchain_community.chat_message_histories import ChatMessageHistory
+from langchain_core.runnables.history import RunnableWithMessageHistory
 
 # ==========================================
 # 1. GLOBAL CONFIGURATION & ENVIRONMENT
@@ -79,6 +81,7 @@ def prepare_vector_store():
 # ==========================================
 # 3. AI ORCHESTRATION (LCEL PIPELINE)
 # ==========================================
+'''
 def get_rag_chain(vectorstore):
     """
     Constructs the Retrieval-Augmented Generation (RAG) chain using 
@@ -92,20 +95,25 @@ def get_rag_chain(vectorstore):
     retriever = vectorstore.as_retriever(search_kwargs={"k": 5})
     
     # Reasoning-focused prompt to handle conflicting information and updates
-    template = """You are a logical auditor. Your goal is to find the MOST ACCURATE and CURRENT answer 
+    template = """
+    You are a logical auditor. Your goal is to find the MOST ACCURATE and CURRENT answer 
     based ONLY on the documents provided.
 
     Follow these steps:
-    1. List all mentions of a "password" found in the context.
-    2. Check if any mention explicitly contradicts or updates a previous one.
-    3. Identify the "real" or "final" version based on the text's logic.
+    1. Check if any mention explicitly contradicts or updates a previous one.
+    2. Identify the "real" or "final" version based on the text's logic.
 
+    Conversation History:
+    {chat_history}
+    
     Context:
     {context}
 
-    Question: {question}
+    Question: 
+    {question}
 
-    Final Answer (just the password):"""
+    Final Answer :
+    """
     
     prompt = ChatPromptTemplate.from_template(template)
 
@@ -128,6 +136,84 @@ def get_rag_chain(vectorstore):
         )
     )
     return chain
+'''
+store = {}
+
+def get_session_history(session_id):
+    if session_id not in store:
+        store[session_id] = ChatMessageHistory()
+    return store[session_id]
+
+def get_rag_chain_with_history(vectorstore):
+    """
+    Constructs the Retrieval-Augmented Generation (RAG) chain using 
+    LangChain Expression Language (LCEL).
+    """
+    
+    # Initialize LLM with Temperature 0 for deterministic, logical reasoning
+    llm = ChatGoogleGenerativeAI(model="gemini-3-flash-preview", temperature=0)
+    
+    # Configure retriever to fetch 'k' most relevant chunks for comprehensive context
+    retriever = vectorstore.as_retriever(search_kwargs={"k": 5})
+    
+    # Reasoning-focused prompt to handle conflicting information and updates
+    template = """
+    You are a logical auditor. Your goal is to find the MOST ACCURATE and CURRENT answer 
+    based ONLY on the documents provided.
+
+    Follow these steps:
+    1. Check if any mention explicitly contradicts or updates a previous one.
+    2. Identify the "real" or "final" version based on the text's logic.
+
+    Conversation History:
+    {chat_history}
+    
+    Context:
+    {context}
+
+    Question: 
+    {question}
+
+    Final Answer :
+    """
+    
+    prompt = ChatPromptTemplate.from_template(template)
+
+    # LCEL 'Pipe' structure: Input -> Context Retrieval -> Prompt -> LLM -> Output
+    # Passes retrieved docs into context directly, the chain contains a key 'context' (list of docs)
+    # In RunnablePassthrough.assign, call format_docs to send formatted text to the prompt, but keep original docs in 'context'
+    # Keeping original docs let API return source info later if needed
+    context_step = {
+        "context": lambda x: format_docs(retriever.invoke(x["question"])),
+        "question": lambda x: x["question"],
+        "chat_history": lambda x: x["chat_history"]
+    }
+
+    gen_chain = context_step | prompt | llm | StrOutputParser()
+
+    '''
+    base_chain = (
+        {"context": retriever, "question": RunnablePassthrough()}
+        | RunnablePassthrough.assign(
+            answer=(
+                (lambda x: {
+                    "context": format_docs(x["context"]),
+                    "question": x["question"],
+                    "chat_history": x.get("chat_history", [])
+                })
+                | prompt
+                | llm
+                | StrOutputParser()
+            )
+        )
+    )
+    '''
+    return RunnableWithMessageHistory(
+        gen_chain,
+        get_session_history,
+        input_messages_key="question",
+        history_messages_key="chat_history",
+    )
 
 # ==========================================
 # 4. EXECUTION ENTRY POINT
@@ -140,14 +226,16 @@ if __name__ == "__main__":
     
     # Build the system components
     v_store = prepare_vector_store()
-    rag_chain = get_rag_chain(v_store)
+    rag_chain = get_rag_chain_with_history(v_store)
     
     # Interactive query loop
     print("\nAI Engine Ready. Ask a question about your documents:")
     user_query = input("> ")
     print("\nAI Response:", rag_chain.invoke(user_query))
 
-    # Old chain
+
+
+# Old chain
 
     '''
         {"context": retriever | format_docs, "question": RunnablePassthrough()}
